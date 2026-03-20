@@ -2449,6 +2449,212 @@ function resetDemo() {
 }
 
 // ═══════════════════════════════════════════════════
+// SPRINT 1: HISTÓRICO DE TRANSACÇÕES
+// ═══════════════════════════════════════════════════
+
+/**
+ * Adiciona uma nova transacção ao histórico
+ */
+function addTransaction() {
+  const type = document.getElementById('txType').value;
+  const ticker = document.getElementById('txTicker').value.trim().toUpperCase();
+  const date = document.getElementById('txDate').value;
+  const qty = parseFloat(document.getElementById('txQty').value);
+  const price = parseFloat(document.getElementById('txPrice').value);
+  const fees = parseFloat(document.getElementById('txFees').value) || 0;
+  
+  // Validação
+  if (!ticker || !date || isNaN(qty) || isNaN(price)) {
+    toast('Preenche todos os campos obrigatórios.', 'err');
+    return;
+  }
+  
+  if (qty <= 0 || price <= 0) {
+    toast('Quantidade e preço devem ser positivos.', 'err');
+    return;
+  }
+  
+  // Calcular total
+  const total = (type === 'BUY' ? qty * price + fees :
+                 type === 'SELL' ? qty * price - fees :
+                 qty * price); // DIVIDEND
+  
+  // Criar transacção
+  const tx = {
+    id: 'tx_' + Date.now(),
+    type,
+    ticker,
+    date,
+    qty,
+    price,
+    fees,
+    total,
+    currency: inferCurrency(ticker),
+    notes: '',
+    timestamp: Date.now()
+  };
+  
+  transactions.push(tx);
+  
+  // Ordenar por data (mais recente primeiro)
+  transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+  
+  // Guardar
+  localStorage.setItem('transactions_v1', JSON.stringify(transactions));
+  
+  // Actualizar UI
+  renderTransactions();
+  clearTransactionForm();
+  
+  toast(`✓ Transacção ${type === 'BUY' ? 'de compra' : type === 'SELL' ? 'de venda' : 'de dividendo'} adicionada`, 'ok');
+  
+  console.log('📝 Transaction added:', tx);
+}
+
+/**
+ * Limpa o formulário de transacção
+ */
+function clearTransactionForm() {
+  document.getElementById('txTicker').value = '';
+  document.getElementById('txQty').value = '';
+  document.getElementById('txPrice').value = '';
+  document.getElementById('txFees').value = '0';
+  
+  // Define data de hoje por padrão
+  document.getElementById('txDate').valueAsDate = new Date();
+}
+
+/**
+ * Renderiza a tabela de transacções
+ */
+function renderTransactions() {
+  const tbody = document.getElementById('transactionsTable');
+  const countEl = document.getElementById('txCount');
+  
+  if (transactions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty"><div class="icon">📜</div>Sem transacções registadas. Adiciona a tua primeira transacção acima.</div></td></tr>';
+    countEl.textContent = '0 transacções';
+    updateTransactionStats();
+    return;
+  }
+  
+  countEl.textContent = `${transactions.length} transacção${transactions.length !== 1 ? 'ões' : ''}`;
+  
+  tbody.innerHTML = transactions.map((tx, i) => {
+    const typeConfig = {
+      'BUY': { label: '🟢 Compra', color: 'var(--green)' },
+      'SELL': { label: '🔴 Venda', color: 'var(--red)' },
+      'DIVIDEND': { label: '💰 Dividendo', color: 'var(--yellow)' }
+    };
+    
+    const config = typeConfig[tx.type] || { label: tx.type, color: 'var(--muted)' };
+    
+    return `
+      <tr>
+        <td>${new Date(tx.date).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+        <td><span style="color:${config.color};font-weight:600;font-size:0.85rem">${config.label}</span></td>
+        <td><span class="ticker-badge">${tx.ticker}</span></td>
+        <td>${tx.qty}</td>
+        <td>${fmtC(tx.price, tx.currency)}</td>
+        <td>${tx.fees > 0 ? fmtC(tx.fees, tx.currency) : '—'}</td>
+        <td style="font-weight:600">${fmtC(tx.total, tx.currency)}</td>
+        <td onclick="event.stopPropagation()">
+          <button class="btn danger" onclick="deleteTransaction(${i})" title="Remover transacção">✕</button>
+        </td>
+      </tr>`;
+  }).join('');
+  
+  updateTransactionStats();
+}
+
+/**
+ * Actualiza as estatísticas de transacções
+ */
+function updateTransactionStats() {
+  const stats = transactions.reduce((acc, tx) => {
+    if (tx.type === 'BUY') {
+      acc.invested += tx.total;
+      acc.buyCount++;
+    }
+    if (tx.type === 'SELL') {
+      acc.sold += tx.total;
+      acc.sellCount++;
+    }
+    if (tx.type === 'DIVIDEND') {
+      acc.dividends += tx.total;
+      acc.divCount++;
+    }
+    return acc;
+  }, { invested: 0, sold: 0, dividends: 0, buyCount: 0, sellCount: 0, divCount: 0 });
+  
+  // P&L Realizado = Total Vendido - Total Investido (simplificado)
+  const realizedPnL = stats.sold - stats.invested;
+  const realizedPnLPct = stats.invested > 0 ? (realizedPnL / stats.invested) * 100 : 0;
+  
+  // Actualizar valores
+  document.getElementById('txTotalInvested').textContent = stats.invested > 0 ? fmtC(stats.invested) : '—';
+  document.getElementById('txTotalSold').textContent = stats.sold > 0 ? fmtC(stats.sold) : '—';
+  document.getElementById('txDividends').textContent = stats.dividends > 0 ? fmtC(stats.dividends) : '—';
+  
+  const pnlEl = document.getElementById('txRealizedPnL');
+  const pnlPctEl = document.getElementById('txRealizedPnLPct');
+  
+  if (stats.sold > 0 || stats.invested > 0) {
+    pnlEl.textContent = (realizedPnL >= 0 ? '+' : '') + fmtC(realizedPnL);
+    pnlEl.className = 'card-value ' + (realizedPnL >= 0 ? 'up' : 'down');
+    pnlPctEl.textContent = fmtP(realizedPnLPct);
+    pnlPctEl.className = 'card-sub ' + (realizedPnL >= 0 ? 'up' : 'down');
+  } else {
+    pnlEl.textContent = '—';
+    pnlEl.className = 'card-value';
+    pnlPctEl.textContent = 'Sem vendas realizadas';
+    pnlPctEl.className = 'card-sub';
+  }
+}
+
+/**
+ * Remove uma transacção
+ */
+function deleteTransaction(i) {
+  const tx = transactions[i];
+  if (!confirm(`Remover transacção de ${tx.type === 'BUY' ? 'compra' : tx.type === 'SELL' ? 'venda' : 'dividendo'} de ${tx.ticker}?`)) {
+    return;
+  }
+  
+  transactions.splice(i, 1);
+  localStorage.setItem('transactions_v1', JSON.stringify(transactions));
+  renderTransactions();
+  
+  toast('Transacção removida ✓', 'ok');
+}
+
+/**
+ * Calcula o preço médio de compra de um ticker baseado no histórico
+ */
+function calculateAvgPrice(ticker) {
+  const buyTxs = transactions.filter(tx => tx.ticker === ticker && tx.type === 'BUY');
+  
+  if (buyTxs.length === 0) return null;
+  
+  const totalQty = buyTxs.reduce((sum, tx) => sum + tx.qty, 0);
+  const totalCost = buyTxs.reduce((sum, tx) => sum + tx.total, 0);
+  
+  return totalQty > 0 ? totalCost / totalQty : null;
+}
+
+/**
+ * Calcula a quantidade total de um ticker baseado no histórico
+ */
+function calculateTotalQty(ticker) {
+  return transactions.reduce((total, tx) => {
+    if (tx.ticker !== ticker) return total;
+    if (tx.type === 'BUY') return total + tx.qty;
+    if (tx.type === 'SELL') return total - tx.qty;
+    return total;
+  }, 0);
+}
+
+// ═══════════════════════════════════════════════════
 // SPRINT 0: EXPORTAÇÃO/IMPORTAÇÃO DE DADOS
 // ═══════════════════════════════════════════════════
 
@@ -2459,13 +2665,14 @@ function resetDemo() {
 function exportPortfolio() {
   try {
     const exportData = {
-      version: '2.0',
+      version: '2.1',
       exportDate: new Date().toISOString(),
       data: {
         positions: positions,
         watchlist: watchlist,
         fundamentals: fundamentals,
         thesisNotes: thesisNotes,
+        transactions: transactions,
         apiConfig: {
           alphavantage: API_CONFIG.alphavantage.key !== 'demo' ? '***' : 'demo',
           finnhub: API_CONFIG.finnhub.key ? '***' : '',
@@ -2475,7 +2682,8 @@ function exportPortfolio() {
       metadata: {
         totalPositions: positions.length,
         totalValue: positions.reduce((s,p) => s + p.qty * p.curPrice, 0),
-        watchlistCount: watchlist.length
+        watchlistCount: watchlist.length,
+        transactionsCount: transactions.length
       }
     };
 
@@ -2553,9 +2761,15 @@ function importPortfolio(event) {
         saveThesisNotes();
       }
       
+      if (importData.data.transactions) {
+        transactions = importData.data.transactions;
+        localStorage.setItem('transactions_v1', JSON.stringify(transactions));
+      }
+      
       // Refresh UI
       render();
       renderWatchlist();
+      renderTransactions();
       
       toast(`✓ Portfolio importado com sucesso!`, 'ok');
       console.log('📥 Import successful:', importData.metadata);
@@ -2676,6 +2890,11 @@ function exportToCSV() {
     console.error('CSV export error:', e);
     toast('❌ Erro ao exportar CSV', 'err');
   }
+}
+
+// Inicializar data de hoje no formulário de transacções
+if (document.getElementById('txDate')) {
+  document.getElementById('txDate').valueAsDate = new Date();
 }
 
 // auto-refresh on load
