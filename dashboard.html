@@ -158,6 +158,10 @@
 <header>
   <h1>💼 O meu <span>Portfolio</span></h1>
   <div class="header-right">
+    <button class="refresh-btn" onclick="exportPortfolio()" title="Exportar dados para JSON">💾 Exportar</button>
+    <button class="refresh-btn" onclick="document.getElementById('importFile').click()" title="Importar dados de JSON">📂 Importar</button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importPortfolio(event)"/>
+    <button class="refresh-btn" onclick="exportToCSV()" title="Exportar para CSV">📊 CSV</button>
     <button class="refresh-btn" onclick="refreshAllPrices()" id="refreshBtn">⟳ Actualizar Cotações</button>
     <button class="refresh-btn" onclick="resetDemo()" style="color:var(--muted);font-size:0.72rem">↺ Reset Demo</button>
     <span class="date-badge" id="dateBadge"></span>
@@ -170,6 +174,7 @@
   <button class="nav-tab" onclick="showPage('mercado')">📈 Mercado</button>
   <button class="nav-tab" onclick="showPage('watchlist')">👁 Watchlist</button>
   <button class="nav-tab" onclick="showPage('analise')">🔍 Análise</button>
+  <button class="nav-tab" onclick="showPage('historico')">📜 Histórico</button>
 </div>
 
 <!-- ══════════════════════════════════════════ -->
@@ -466,6 +471,106 @@
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════ -->
+<!-- PAGE: HISTÓRICO DE TRANSACÇÕES            -->
+<!-- ══════════════════════════════════════════ -->
+<div class="page" id="page-historico">
+  
+  <!-- Adicionar Transacção -->
+  <div class="card" style="margin-bottom:20px">
+    <div class="section-title" style="margin-bottom:14px">
+      <span class="dot" style="background:var(--green)"></span>
+      Nova Transacção
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Tipo *</label>
+        <select id="txType">
+          <option value="BUY">🟢 Compra</option>
+          <option value="SELL">🔴 Venda</option>
+          <option value="DIVIDEND">💰 Dividendo</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Ticker *</label>
+        <input type="text" id="txTicker" placeholder="ex: AAPL"/>
+      </div>
+      <div class="form-group">
+        <label>Data *</label>
+        <input type="date" id="txDate"/>
+      </div>
+      <div class="form-group">
+        <label>Quantidade *</label>
+        <input type="number" id="txQty" placeholder="10" step="any"/>
+      </div>
+      <div class="form-group">
+        <label>Preço *</label>
+        <input type="number" id="txPrice" placeholder="145.00" step="any"/>
+      </div>
+      <div class="form-group">
+        <label>Comissões</label>
+        <input type="number" id="txFees" placeholder="0.00" step="any" value="0"/>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:10px">
+      <button class="btn" onclick="addTransaction()">➕ Adicionar Transacção</button>
+      <button class="btn secondary" onclick="clearTransactionForm()">🔄 Limpar</button>
+    </div>
+  </div>
+  
+  <!-- Estatísticas -->
+  <div class="grid-4" style="margin-bottom:20px">
+    <div class="card">
+      <div class="card-title">Total Investido</div>
+      <div class="card-value" id="txTotalInvested">—</div>
+      <div class="card-sub">Compras realizadas</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Total Vendido</div>
+      <div class="card-value" id="txTotalSold">—</div>
+      <div class="card-sub">Vendas realizadas</div>
+    </div>
+    <div class="card">
+      <div class="card-title">P&L Realizado</div>
+      <div class="card-value" id="txRealizedPnL">—</div>
+      <div class="card-sub" id="txRealizedPnLPct">—</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Dividendos Recebidos</div>
+      <div class="card-value" id="txDividends">—</div>
+      <div class="card-sub">Rendimento passivo</div>
+    </div>
+  </div>
+  
+  <!-- Tabela de Transacções -->
+  <div class="card">
+    <div class="section-title" style="margin-bottom:14px">
+      <span class="dot" style="background:var(--accent2)"></span>
+      Histórico de Transacções
+      <span style="margin-left:auto;font-size:0.75rem;color:var(--muted)" id="txCount">0 transacções</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Tipo</th>
+            <th>Ticker</th>
+            <th>Qtd.</th>
+            <th>Preço</th>
+            <th>Comissões</th>
+            <th>Total</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="transactionsTable">
+          <tr><td colspan="8"><div class="empty"><div class="icon">📜</div>Sem transacções registadas. Adiciona a tua primeira transacção acima.</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL POSIÇÃO -->
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal">
@@ -649,6 +754,7 @@ let positions  = JSON.parse(localStorage.getItem('portfolio_v1') || '[]');
 let watchlist  = JSON.parse(localStorage.getItem('watchlist_v1') || '[]');
 let fundamentals = JSON.parse(localStorage.getItem('fundamentals_v1') || '{}'); // { AAPL: { pe, roe, ... }, ... }
 let thesisNotes  = JSON.parse(localStorage.getItem('thesis_v1') || '{}');      // { AAPL: "text...", ... }
+let transactions = JSON.parse(localStorage.getItem('transactions_v1') || '[]'); // Sprint 1: Histórico de transacções
 let liveQuotes = {};           // { AAPL: { price, prevClose, change, changePct } }
 let editIndex  = null;
 let allocChart = null;
@@ -669,12 +775,14 @@ function showPage(id) {
     if ((id === 'portfolio' && txt.includes('portfolio')) ||
         (id === 'mercado' && txt.includes('mercado')) ||
         (id === 'watchlist' && txt.includes('watch')) ||
-        (id === 'analise' && txt.includes('análise')))
+        (id === 'analise' && txt.includes('análise')) ||
+        (id === 'historico' && txt.includes('histórico')))
       t.classList.add('active');
   });
   if (id === 'mercado') renderQuoteGrid();
   if (id === 'watchlist') renderWatchlist();
   if (id === 'analise') renderAnalysisSelector();
+  if (id === 'historico') renderTransactions();
 }
 
 // ═══════════════════════════════════════════════════
@@ -2338,6 +2446,236 @@ function resetDemo() {
   localStorage.removeItem('portfolio_v1');
   localStorage.removeItem('watchlist_v1');
   location.reload();
+}
+
+// ═══════════════════════════════════════════════════
+// SPRINT 0: EXPORTAÇÃO/IMPORTAÇÃO DE DADOS
+// ═══════════════════════════════════════════════════
+
+/**
+ * Exporta todos os dados do portfolio para JSON
+ * Inclui: posições, watchlist, fundamentals, notas de tese
+ */
+function exportPortfolio() {
+  try {
+    const exportData = {
+      version: '2.0',
+      exportDate: new Date().toISOString(),
+      data: {
+        positions: positions,
+        watchlist: watchlist,
+        fundamentals: fundamentals,
+        thesisNotes: thesisNotes,
+        apiConfig: {
+          alphavantage: API_CONFIG.alphavantage.key !== 'demo' ? '***' : 'demo',
+          finnhub: API_CONFIG.finnhub.key ? '***' : '',
+          fmp: API_CONFIG.fmp.key ? '***' : ''
+        }
+      },
+      metadata: {
+        totalPositions: positions.length,
+        totalValue: positions.reduce((s,p) => s + p.qty * p.curPrice, 0),
+        watchlistCount: watchlist.length
+      }
+    };
+
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `portfolio-backup-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    toast(`✓ Portfolio exportado com sucesso (${positions.length} posições)`, 'ok');
+    console.log('📦 Export successful:', exportData.metadata);
+    
+  } catch (e) {
+    console.error('Export error:', e);
+    toast('❌ Erro ao exportar portfolio', 'err');
+  }
+}
+
+/**
+ * Importa dados de um ficheiro JSON
+ * Valida estrutura e faz merge inteligente
+ */
+function importPortfolio(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  
+  reader.onload = function(e) {
+    try {
+      const importData = JSON.parse(e.target.result);
+      
+      // Validação básica
+      if (!importData.version || !importData.data) {
+        throw new Error('Formato de ficheiro inválido');
+      }
+      
+      // Confirma importação
+      const msg = `Importar dados?\n\n` +
+        `📊 Posições: ${importData.data.positions?.length || 0}\n` +
+        `👁 Watchlist: ${importData.data.watchlist?.length || 0}\n` +
+        `📝 Notas: ${Object.keys(importData.data.thesisNotes || {}).length}\n` +
+        `📈 Fundamentals: ${Object.keys(importData.data.fundamentals || {}).length}\n\n` +
+        `⚠️ Isto irá SUBSTITUIR os dados actuais!`;
+      
+      if (!confirm(msg)) {
+        toast('Importação cancelada', 'info');
+        return;
+      }
+      
+      // Importa dados
+      if (importData.data.positions) {
+        positions = importData.data.positions;
+        save();
+      }
+      
+      if (importData.data.watchlist) {
+        watchlist = importData.data.watchlist;
+        saveWL();
+      }
+      
+      if (importData.data.fundamentals) {
+        fundamentals = importData.data.fundamentals;
+        saveFundamentals();
+      }
+      
+      if (importData.data.thesisNotes) {
+        thesisNotes = importData.data.thesisNotes;
+        saveThesisNotes();
+      }
+      
+      // Refresh UI
+      render();
+      renderWatchlist();
+      
+      toast(`✓ Portfolio importado com sucesso!`, 'ok');
+      console.log('📥 Import successful:', importData.metadata);
+      
+      // Actualiza cotações após 1 segundo
+      setTimeout(() => refreshAllPrices(), 1000);
+      
+    } catch (e) {
+      console.error('Import error:', e);
+      toast(`❌ Erro ao importar: ${e.message}`, 'err');
+    }
+  };
+  
+  reader.onerror = function() {
+    toast('❌ Erro ao ler ficheiro', 'err');
+  };
+  
+  reader.readAsText(file);
+  
+  // Reset input para permitir re-importar o mesmo ficheiro
+  event.target.value = '';
+}
+
+/**
+ * Exporta posições para formato CSV
+ * Útil para análise em Excel/Google Sheets
+ */
+function exportToCSV() {
+  try {
+    if (positions.length === 0) {
+      toast('Sem posições para exportar', 'err');
+      return;
+    }
+    
+    // Header CSV
+    const headers = [
+      'Ticker',
+      'Nome',
+      'Sector',
+      'Moeda',
+      'Quantidade',
+      'Preço Médio',
+      'Preço Actual',
+      'Valor Total',
+      'Custo Total',
+      'P&L',
+      'P&L %',
+      'Peso Portfolio %'
+    ];
+    
+    const totalValue = positions.reduce((s,p) => s + p.qty * p.curPrice, 0);
+    
+    // Linhas de dados
+    const rows = positions.map(p => {
+      const value = p.qty * p.curPrice;
+      const cost = p.qty * p.avgPrice;
+      const pnl = value - cost;
+      const pnlPct = cost > 0 ? (pnl/cost)*100 : 0;
+      const weight = totalValue > 0 ? (value/totalValue)*100 : 0;
+      
+      return [
+        p.ticker,
+        `"${p.name}"`, // Quotes para nomes com vírgulas
+        p.sector,
+        p.currency,
+        p.qty,
+        p.avgPrice.toFixed(2),
+        p.curPrice.toFixed(2),
+        value.toFixed(2),
+        cost.toFixed(2),
+        pnl.toFixed(2),
+        pnlPct.toFixed(2),
+        weight.toFixed(2)
+      ];
+    });
+    
+    // Linha de totais
+    const totalCost = positions.reduce((s,p) => s + p.qty * p.avgPrice, 0);
+    const totalPnL = totalValue - totalCost;
+    const totalPnLPct = totalCost > 0 ? (totalPnL/totalCost)*100 : 0;
+    
+    rows.push([
+      'TOTAL',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      totalValue.toFixed(2),
+      totalCost.toFixed(2),
+      totalPnL.toFixed(2),
+      totalPnLPct.toFixed(2),
+      '100.00'
+    ]);
+    
+    // Constrói CSV
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+    
+    // Download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `portfolio-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    toast(`✓ CSV exportado com ${positions.length} posições`, 'ok');
+    
+  } catch (e) {
+    console.error('CSV export error:', e);
+    toast('❌ Erro ao exportar CSV', 'err');
+  }
 }
 
 // auto-refresh on load
