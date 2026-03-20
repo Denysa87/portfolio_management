@@ -698,26 +698,22 @@ function toast(msg, type='info') {
 }
 
 // ═══════════════════════════════════════════════════
-// YAHOO FINANCE PROXY  (public CORS proxy)
-// ═══════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════
-// DATA FETCHING — estratégia definitiva
-// Stooq para tickers US (.us), Yahoo query2 directo para resto
+// DATA FETCHING — Sistema Multi-Fonte com Fallback Robusto
 // ═══════════════════════════════════════════════════
 
 // Converte ticker YF → Stooq (só para tickers US sem sufixo)
 function toStooqUS(ticker) {
-  // Só usa Stooq para tickers sem sufixo de bolsa (mercado US)
   if (ticker.includes('.')) return null;
   return ticker.toLowerCase() + '.us';
 }
 
+// Fonte 1: Stooq (para tickers US)
 async function fetchFromStooq(ticker) {
   const sq = toStooqUS(ticker);
-  if (!sq) return null; // não é ticker US puro
+  if (!sq) return null;
   try {
     const url = `https://stooq.com/q/l/?s=${encodeURIComponent(sq)}&f=sd2t2ohlcvn&h&e=csv`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     const text = await res.text();
     const lines = text.trim().split('\n');
@@ -728,8 +724,12 @@ async function fetchFromStooq(ticker) {
     if (isNaN(close) || close === 0) return null;
     const chg    = close - open;
     const chgPct = open > 0 ? (chg / open) * 100 : 0;
+    console.log(`✓ Stooq: ${ticker} = ${close}`);
     return { price: close, prev: open, change: chg, changePct: chgPct, currency: 'USD', source: 'Stooq' };
-  } catch(e) { return null; }
+  } catch(e) {
+    console.warn(`✗ Stooq failed for ${ticker}:`, e.message);
+    return null;
+  }
 }
 
 async function fetchHistoryFromStooq(ticker, range) {
@@ -743,7 +743,7 @@ async function fetchHistoryFromStooq(ticker, range) {
     const df   = `${from.getFullYear()}${pad(from.getMonth()+1)}${pad(from.getDate())}`;
     const dt   = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}`;
     const url  = `https://stooq.com/q/d/l/?s=${encodeURIComponent(sq)}&d1=${df}&d2=${dt}&i=d`;
-    const res  = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const res  = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return null;
     const text  = await res.text();
     const lines = text.trim().split('\n');
@@ -756,25 +756,36 @@ async function fetchHistoryFromStooq(ticker, range) {
       return { date: `${dy}/${mo}/${yr.slice(2)}`, close: v };
     }).filter(Boolean);
     if (points.length < 2) return null;
+    console.log(`✓ Stooq history: ${ticker} (${points.length} points)`);
     return { points, currency: 'USD', name: ticker };
-  } catch(e) { return null; }
+  } catch(e) {
+    console.warn(`✗ Stooq history failed for ${ticker}:`, e.message);
+    return null;
+  }
 }
 
-// Yahoo Finance query2 — funciona directamente do browser sem proxy
+// Fonte 2: Yahoo Finance (direto)
 async function fetchFromYahoo(ticker) {
   try {
     const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(7000) });
-    if (!res.ok) return null;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    if (!json?.chart?.result?.[0]) return null;
+    if (!json?.chart?.result?.[0]) throw new Error('No data in response');
     const meta   = json.chart.result[0].meta;
     const price  = meta.regularMarketPrice;
     const prev   = meta.chartPreviousClose || meta.previousClose || price;
     const chg    = price - prev;
     const chgPct = prev > 0 ? (chg / prev) * 100 : 0;
+    console.log(`✓ Yahoo: ${ticker} = ${price}`);
     return { price, prev, change: chg, changePct: chgPct, currency: meta.currency || inferCurrency(ticker), source: 'Yahoo' };
-  } catch(e) { return null; }
+  } catch(e) {
+    console.warn(`✗ Yahoo failed for ${ticker}:`, e.message);
+    return null;
+  }
 }
 
 async function fetchHistoryFromYahoo(ticker, range) {
@@ -782,10 +793,13 @@ async function fetchHistoryFromYahoo(ticker, range) {
   const interval = intervalMap[range] || '1d';
   try {
     const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(12000),
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    if (!json?.chart?.result?.[0]) return null;
+    if (!json?.chart?.result?.[0]) throw new Error('No data in response');
     const result = json.chart.result[0];
     const points = result.timestamp
       .map((t, i) => ({
@@ -793,17 +807,116 @@ async function fetchHistoryFromYahoo(ticker, range) {
         close: result.indicators.quote[0].close[i]
       }))
       .filter(p => p.close != null && !isNaN(p.close));
-    if (points.length < 2) return null;
+    if (points.length < 2) throw new Error('Insufficient data points');
+    console.log(`✓ Yahoo history: ${ticker} (${points.length} points)`);
     return { points, currency: result.meta.currency || inferCurrency(ticker), name: result.meta.shortName || ticker };
-  } catch(e) { return null; }
+  } catch(e) {
+    console.warn(`✗ Yahoo history failed for ${ticker}:`, e.message);
+    return null;
+  }
 }
 
-// Orquestrador: Stooq para US, Yahoo directo para resto
-async function fetchQuote(ticker) {
-  return (await fetchFromStooq(ticker)) || (await fetchFromYahoo(ticker));
+// Fonte 3: Yahoo via CORS Proxy (fallback)
+async function fetchFromYahooProxy(ticker) {
+  const proxies = [
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    url => `https://corsproxy.io/?${encodeURIComponent(url)}`
+  ];
+  
+  const baseUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
+  
+  for (const proxy of proxies) {
+    try {
+      const res = await fetch(proxy(baseUrl), { signal: AbortSignal.timeout(12000) });
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (!json?.chart?.result?.[0]) continue;
+      const meta = json.chart.result[0].meta;
+      const price = meta.regularMarketPrice;
+      const prev = meta.chartPreviousClose || meta.previousClose || price;
+      const chg = price - prev;
+      const chgPct = prev > 0 ? (chg / prev) * 100 : 0;
+      console.log(`✓ Yahoo Proxy: ${ticker} = ${price}`);
+      return { price, prev, change: chg, changePct: chgPct, currency: meta.currency || inferCurrency(ticker), source: 'Yahoo (Proxy)' };
+    } catch(e) {
+      console.warn(`✗ Proxy failed:`, e.message);
+      continue;
+    }
+  }
+  return null;
 }
+
+async function fetchHistoryFromYahooProxy(ticker, range) {
+  const intervalMap = { '1mo':'1d','3mo':'1d','6mo':'1d','1y':'1wk','5y':'1mo' };
+  const interval = intervalMap[range] || '1d';
+  const proxies = [
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    url => `https://corsproxy.io/?${encodeURIComponent(url)}`
+  ];
+  
+  const baseUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
+  
+  for (const proxy of proxies) {
+    try {
+      const res = await fetch(proxy(baseUrl), { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (!json?.chart?.result?.[0]) continue;
+      const result = json.chart.result[0];
+      const points = result.timestamp
+        .map((t, i) => ({
+          date: new Date(t * 1000).toLocaleDateString('pt-PT', { day:'2-digit', month:'short', year:'2-digit' }),
+          close: result.indicators.quote[0].close[i]
+        }))
+        .filter(p => p.close != null && !isNaN(p.close));
+      if (points.length < 2) continue;
+      console.log(`✓ Yahoo Proxy history: ${ticker} (${points.length} points)`);
+      return { points, currency: result.meta.currency || inferCurrency(ticker), name: result.meta.shortName || ticker };
+    } catch(e) {
+      console.warn(`✗ Proxy history failed:`, e.message);
+      continue;
+    }
+  }
+  return null;
+}
+
+// Orquestrador: Tenta múltiplas fontes com fallback
+async function fetchQuote(ticker) {
+  console.log(`📊 Fetching quote for ${ticker}...`);
+  
+  // Tenta Stooq (apenas para US)
+  const stooq = await fetchFromStooq(ticker);
+  if (stooq) return stooq;
+  
+  // Tenta Yahoo direto
+  const yahoo = await fetchFromYahoo(ticker);
+  if (yahoo) return yahoo;
+  
+  // Tenta Yahoo com proxy (último recurso)
+  const yahooProxy = await fetchFromYahooProxy(ticker);
+  if (yahooProxy) return yahooProxy;
+  
+  console.error(`❌ All sources failed for ${ticker}`);
+  return null;
+}
+
 async function fetchHistory(ticker, range) {
-  return (await fetchHistoryFromStooq(ticker, range)) || (await fetchHistoryFromYahoo(ticker, range));
+  console.log(`📈 Fetching history for ${ticker} (${range})...`);
+  
+  // Tenta Stooq (apenas para US)
+  const stooq = await fetchHistoryFromStooq(ticker, range);
+  if (stooq) return stooq;
+  
+  // Tenta Yahoo direto
+  const yahoo = await fetchHistoryFromYahoo(ticker, range);
+  if (yahoo) return yahoo;
+  
+  // Tenta Yahoo com proxy (último recurso)
+  const yahooProxy = await fetchHistoryFromYahooProxy(ticker, range);
+  if (yahooProxy) return yahooProxy;
+  
+  console.error(`❌ All sources failed for ${ticker} history`);
+  return null;
 }
 
 // CORS proxies — apenas para search (não para cotações)
@@ -1061,16 +1174,29 @@ async function drawPriceChart(ticker, range) {
   const empty  = document.getElementById('priceChartEmpty');
   const header = document.getElementById('chartHeader');
 
-  header.innerHTML = `<span style="color:var(--muted);font-size:0.85rem">A carregar ${ticker}...</span>`;
+  header.innerHTML = `
+    <span style="color:var(--yellow);font-size:0.85rem">
+      <span class="spin">⟳</span> A carregar ${ticker}... (tentando múltiplas fontes)
+    </span>`;
   empty.style.display = 'none';
   canvas.style.display = 'block';
 
   const data = await fetchHistory(ticker, range);
 
   if (!data || data.points.length === 0) {
-    header.innerHTML = `<span style="color:var(--red);font-size:0.85rem">Erro: não foi possível carregar ${ticker}. Verifica o ticker.</span>`;
+    header.innerHTML = `
+      <div style="color:var(--red);font-size:0.85rem">
+        ❌ Erro: não foi possível carregar dados para <strong>${ticker}</strong>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:6px;line-height:1.5">
+          • Verifica se o ticker está correcto<br>
+          • Tenta adicionar sufixo de bolsa (ex: .LS para Portugal, .L para UK, .DE para Alemanha)<br>
+          • Algumas APIs podem estar temporariamente indisponíveis<br>
+          • Abre a consola do browser (F12) para mais detalhes técnicos
+        </div>
+      </div>`;
     canvas.style.display='none'; empty.style.display='flex';
     if (priceChart) { priceChart.destroy(); priceChart=null; }
+    toast(`Erro ao carregar ${ticker}. Verifica o ticker ou tenta novamente.`, 'err');
     return;
   }
 
