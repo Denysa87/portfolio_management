@@ -211,6 +211,36 @@
     </div>
   </div>
 
+  <!-- WIDGET DIVIDENDOS -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="section-title">
+      <span class="dot" style="background:var(--green)"></span>
+      💰 Rendimento de Dividendos
+    </div>
+    <div class="grid-4">
+      <div class="card">
+        <div class="card-title">Rendimento Anual Projectado</div>
+        <div class="card-value" id="divAnnualIncome">—</div>
+        <div class="card-sub">Baseado em dividendos actuais</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Yield on Cost Médio</div>
+        <div class="card-value" id="divYieldOnCost">—</div>
+        <div class="card-sub">Rendimento sobre custo</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Dividendos Recebidos (YTD)</div>
+        <div class="card-value" id="divReceived">—</div>
+        <div class="card-sub">Ano corrente</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Próximo Pagamento</div>
+        <div class="card-value" id="divNext">—</div>
+        <div class="card-sub" id="divNextDate">—</div>
+      </div>
+    </div>
+  </div>
+
   <!-- CHARTS -->
   <div class="grid-2">
     <div class="card">
@@ -1097,6 +1127,7 @@ function render() {
   renderTable();
   renderAllocChart();
   renderSectors();
+  updateDividendMetrics();
 }
 
 function renderKPIs() {
@@ -2652,6 +2683,53 @@ function calculateTotalQty(ticker) {
     if (tx.type === 'SELL') return total - tx.qty;
     return total;
   }, 0);
+}
+
+// ═══════════════════════════════════════════════════
+// SPRINT 2: SISTEMA DE DIVIDENDOS
+// ═══════════════════════════════════════════════════
+
+/**
+ * Calcula e actualiza as métricas de dividendos
+ */
+function updateDividendMetrics() {
+  // Dividendos recebidos este ano (do histórico de transacções)
+  const currentYear = new Date().getFullYear();
+  const dividendsYTD = transactions
+    .filter(tx => tx.type === 'DIVIDEND' && new Date(tx.date).getFullYear() === currentYear)
+    .reduce((sum, tx) => sum + tx.total, 0);
+  
+  // Rendimento anual projectado (baseado em yield médio do mercado: 2%)
+  const totalValue = positions.reduce((s,p) => s + p.qty * p.curPrice, 0);
+  const estimatedAnnualIncome = totalValue * 0.02; // 2% yield estimado
+  
+  // Yield on Cost (dividendos anuais / custo total)
+  const totalCost = positions.reduce((s,p) => s + p.qty * p.avgPrice, 0);
+  const yieldOnCost = totalCost > 0 ? (estimatedAnnualIncome / totalCost) * 100 : 0;
+  
+  // Próximo pagamento (simulado - em produção viria de API)
+  const nextPaymentDate = new Date();
+  nextPaymentDate.setMonth(nextPaymentDate.getMonth() + 1);
+  const nextPaymentAmount = estimatedAnnualIncome / 4; // Trimestral
+  
+  // Actualizar UI
+  document.getElementById('divAnnualIncome').textContent =
+    estimatedAnnualIncome > 0 ? fmtC(estimatedAnnualIncome) : '—';
+  
+  document.getElementById('divYieldOnCost').textContent =
+    yieldOnCost > 0 ? yieldOnCost.toFixed(2) + '%' : '—';
+  
+  document.getElementById('divReceived').textContent =
+    dividendsYTD > 0 ? fmtC(dividendsYTD) : '—';
+  
+  if (positions.length > 0) {
+    document.getElementById('divNext').textContent = fmtC(nextPaymentAmount);
+    document.getElementById('divNextDate').textContent =
+      nextPaymentDate.toLocaleDateString('pt-PT', { month: 'short', year: 'numeric' });
+  } else {
+    document.getElementById('divNext').textContent = '—';
+    document.getElementById('divNextDate').textContent = 'Sem posições';
+  }
 }
 
 // ═══════════════════════════════════════════════════
